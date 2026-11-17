@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>YT_DOWN UI fixture</title></head>
+<body><div id="app"></div><script type="module">
+// Development fixture only. All native commands are mocked: no downloads or file operations.
+import { mockIPC, mockWindows } from '@tauri-apps/api/mocks';
+const settings = {maxConcurrent: 3, defaultQuality:'720p (HD)', downloadFolder:'/Downloads/YT_DOWN', theme:'Dark', notifications:false, autoClose:true, autoCloseDelay:1};
+const makeTask = (id, status, created, title) => ({id, status, created, title, url:'https://www.youtube.com/watch?v=fixture', quality:'720p (HD)', folder:settings.downloadFolder, playlistStart:1, progress:status === 'Completed' ? 100 : 14, downloadedBytes:234420000, totalBytes:1530000000, speed:'2.3 MiB/s', eta:'00:30', error:'', files:[`${settings.downloadFolder}/${title}.mp4`], log:['[download] Continuing download','[download] 14.0% of 1.43 GiB at 2.3 MiB/s'], completedAt:status === 'Completed' ? created+100 : null});
+const state = {settings, tasks:[makeTask('newest','Queued',100,'A newly added download'), makeTask('running','Downloading',90,'Campus Drivers S01 - A very long filename that should truncate neatly'), makeTask('failed','Failed',80,'An earlier interrupted download'), ...Array.from({length:12},(_,i) => makeTask(`completed-${i}`,'Completed',70-i,`Completed video ${i+1}`))]};
+const onlyCompleted = new URLSearchParams(location.search).has('completed');
+if (onlyCompleted) state.tasks = state.tasks.filter(t => t.status === 'Completed');
+mockWindows('main');
+localStorage.setItem('ytdown-native-settings-migrated','true');
+mockIPC((cmd, payload) => {
+  if (cmd === 'get_state') return structuredClone(state);
+  if (cmd === 'tool_status') return {version:'fixture',ffmpeg:true,pauseSupported:true};
+  if (cmd === 'clear_queue') { state.tasks.forEach(t => { if (!['Queued','Downloading','Paused'].includes(t.status)) t.dismissed=true; }); return; }
+  if (cmd === 'toggle_pause') { const t=state.tasks.find(t=>t.id === payload.id); t.status=t.status === 'Paused' ? 'Downloading':'Paused'; return; }
+  if (cmd === 'preview_download') return {title:'Video preview',channel:'Fixture channel',duration:'4:20',playlist:false};
+  if (cmd === 'list_media') return [];
+  if (cmd === 'rename_media') { const t=state.tasks.find(t=>t.files.includes(payload.path)); t.title=payload.name; t.files=[`${settings.downloadFolder}/${payload.name}.mp4`]; return; }
+  if (cmd === 'save_settings') { state.settings=payload.settings; return; }
+  if (cmd.startsWith('plugin:window|')) return;
+  throw Error(`Unimplemented fixture command: ${cmd}`);
+}, {shouldMockEvents:true});
+await import('/src/main.ts');
+</script></body></html>
