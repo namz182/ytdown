@@ -1224,32 +1224,34 @@ pub async fn check_updates() -> Result<Value, String> {
         .json()
         .await
         .map_err(|e| e.to_string())?;
-    let app_result = async {
-        let response: Value = client.post("https://ytdown.michotech.me/api/v1/version/check").json(&json!({"platform": std::env::consts::OS, "version": env!("CARGO_PKG_VERSION"), "runtime": "tauri"})).send().await.map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?.json().await.map_err(|e| e.to_string())?;
-        if response["success"] != true { return Err(response["message"].as_str().unwrap_or("App update service unavailable.").to_string()); }
-        Ok(response)
-    }.await;
-    let mut result = json!({"latestTool": tool["tag_name"], "appVersion": env!("CARGO_PKG_VERSION"), "appUrl": "https://ytdown.michotech.me"});
-    match app_result {
-        Ok(remote) => {
-            // The reference server also distributes the Python desktop app. Only
-            // offer an installer when the server explicitly identifies a Tauri build.
-            if remote["runtime"] == "tauri" || remote["framework"] == "tauri" {
-                if remote["latest_version"]
-                    .as_str()
-                    .is_some_and(|version| newer_version(env!("CARGO_PKG_VERSION"), version))
-                {
-                    result["latestApp"] = remote["latest_version"].clone();
-                }
-                if let Some(url) = remote["download_url"]
+    let mut result = json!({
+        "latestTool": tool["tag_name"],
+        "appVersion": env!("CARGO_PKG_VERSION"),
+        "appUrl": "https://github.com/namz182/ytdown/releases/latest"
+    });
+    let release = async {
+        let response = client
+            .get("https://api.github.com/repos/namz182/ytdown/releases/latest")
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .error_for_status()
+            .map_err(|e| e.to_string())?;
+        response.json::<Value>().await.map_err(|e| e.to_string())
+    }
+    .await;
+    match release {
+        Ok(release) => {
+            let tag = release["tag_name"].as_str().unwrap_or_default();
+            let version = tag.strip_prefix('v').unwrap_or(tag);
+            if newer_version(env!("CARGO_PKG_VERSION"), version) {
+                result["latestApp"] = json!(tag);
+                if let Some(url) = release["html_url"]
                     .as_str()
                     .filter(|url| url.starts_with("https://"))
                 {
                     result["appUrl"] = json!(url);
                 }
-            } else {
-                result["appError"] =
-                    json!("No compatible Tauri release is published by the update service yet.");
             }
         }
         Err(error) => result["appError"] = json!(format!("App update check failed: {error}")),
