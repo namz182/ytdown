@@ -10,7 +10,7 @@ YT_DOWN is a desktop YouTube downloader built with Tauri 2, Rust, TypeScript, an
 
 - Node.js and npm
 - Rust and the [Tauri system prerequisites](https://v2.tauri.app/start/prerequisites/)
-- FFmpeg for MP4 conversion and merging separate video and audio streams
+- FFmpeg for MP4 conversion, merging video and audio, and preparing unsupported formats for the built-in player
 - `libnotify-bin` on Debian or Kali for Linux desktop notifications
 
 yt-dlp installs automatically when you start your first download or preview metadata. You can also manage it in Settings or use an existing executable on your PATH. Install FFmpeg separately for conversion and merging.
@@ -34,6 +34,7 @@ npm run tauri build
 - Review video metadata and playlist options before downloading.
 - Track concurrent downloads with progress, speed, ETA, cancellation, retry, and resume controls.
 - Browse download history and manage files in the media library.
+- Play downloaded audio and video in the built-in player, with seek, volume, and fullscreen controls.
 - Configure download location, quality, concurrency, appearance, and notifications.
 - Search YouTube videos from the app and queue a result directly.
 

@@ -5,7 +5,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import { createIcons, House, FolderOpen, Activity, History, Settings, Info, Download, Search, Clipboard, RefreshCw, Trash2, Copy, ExternalLink, Check, Clock3, ArrowDownToLine, Bell, Palette, Keyboard, UserRound, Globe, HardDrive, FileVideo, Music2, ListVideo, ChevronRight, ChevronLeft, Ellipsis, Pause, Play, Flag, ChevronDown, Pencil, X, LayoutGrid, List } from "lucide";
+import { createIcons, House, FolderOpen, Activity, History, Settings, Info, Download, Search, Clipboard, RefreshCw, Trash2, Copy, ExternalLink, Check, Clock3, ArrowDownToLine, Bell, Palette, Keyboard, UserRound, Globe, HardDrive, FileVideo, Music2, ListVideo, ChevronRight, ChevronLeft, Ellipsis, Pause, Play, Flag, ChevronDown, Pencil, X, LayoutGrid, List, Volume2, VolumeX, Maximize, Minimize, Captions, PictureInPicture2, Repeat } from "lucide";
 
 type Page = "Home" | "History" | "Settings" | "About";
 type YouTubeVideo = { id: string; title: string; channel: string; duration: string; thumbnail: string };
@@ -36,7 +36,7 @@ let progressTitle = "";
 const detailId = new URLSearchParams(location.search).get("download");
 const updateWindow = new URLSearchParams(location.search).has("updates");
 const app = document.querySelector<HTMLDivElement>("#app")!;
-const iconSet = { House, FolderOpen, Activity, History, Settings, Info, Download, Search, Clipboard, RefreshCw, Trash2, Copy, ExternalLink, Check, Clock3, ArrowDownToLine, Bell, Palette, Keyboard, UserRound, Globe, HardDrive, FileVideo, Music2, ListVideo, ChevronRight, ChevronLeft, Ellipsis, Pause, Play, Flag, ChevronDown, Pencil, X, LayoutGrid, List };
+const iconSet = { House, FolderOpen, Activity, History, Settings, Info, Download, Search, Clipboard, RefreshCw, Trash2, Copy, ExternalLink, Check, Clock3, ArrowDownToLine, Bell, Palette, Keyboard, UserRound, Globe, HardDrive, FileVideo, Music2, ListVideo, ChevronRight, ChevronLeft, Ellipsis, Pause, Play, Flag, ChevronDown, Pencil, X, LayoutGrid, List, Volume2, VolumeX, Maximize, Minimize, Captions, PictureInPicture2, Repeat };
 const icon = (name: string, cls = "") => `<i class="icon ${cls}" data-lucide="${name}" aria-hidden="true"></i>`;
 const e = (value: unknown) => escapeHtml(String(value ?? "")).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 const active = (t: Task) => ["Queued", "Downloading", "Paused"].includes(t.status);
@@ -74,7 +74,7 @@ function renderPage() {
     content.innerHTML = `${heading("Download History", `<button class="danger" data-action="clear-history" ${!history.length ? "disabled" : ""}>${icon("trash-2")} Clear All</button>`)}<section>${history.length ? history.map(t => taskRow(t,true)).join("") : empty("history", "No download history", "Completed and stopped downloads appear here.")}</section>`;
   } else if (page === "Settings") { content.innerHTML = settingsMarkup(); }
   else {
-    content.innerHTML = `${heading("About")}<section class="about-hero"><img src="/icons/ytdown.ico" alt=""><h2>YT_DOWN</h2><p>Version 0.1.0</p></section><section class="about-card"><h2>Keyboard Shortcuts</h2>${[["Ctrl + D", "Search YouTube"],["Ctrl + B", "Downloads"],["Ctrl + L", "Clear finished downloads"],["Ctrl + ,", "Settings"],["Ctrl + Q", "Quit"],["Enter", "Download a pasted link"]].map(([key, label]) => `<div class="shortcut-row"><kbd>${key}</kbd><span>${label}</span></div>`).join("")}</section>`;
+    content.innerHTML = `${heading("About")}<section class="about-hero"><img src="/icons/ytdown.ico" alt=""><h2>YT_DOWN</h2><p>Version 0.1.0</p></section><section class="about-card"><h2>Keyboard Shortcuts</h2>${[["Ctrl + D", "Search YouTube"],["Ctrl + B", "Downloads"],["Ctrl + L", "Clear finished downloads"],["Ctrl + ,", "Settings"],["Ctrl + Q", "Quit"],["Enter", "Download a pasted link"],["Space / K", "Play or pause"],["← / →", "Seek 5 seconds"],["J / L", "Seek 10 seconds"],["↑ / ↓", "Change volume"],["M", "Mute or unmute"],["F", "Toggle fullscreen"],["P", "Picture in picture"],["C", "Toggle captions"],["0–9", "Jump to a position"],["Home / End", "Go to start or end"],["Esc", "Close player"],["?", "Show player shortcuts"]].map(([key, label]) => `<div class="shortcut-row"><kbd>${key}</kbd><span>${label}</span></div>`).join("")}</section>`;
   }
 }
 
@@ -111,16 +111,19 @@ function renderMedia() {
   const fileMarkup = items.map(item => {
     const thumbnail = mediaThumbnail(item);
     const title = item.name.replace(/\.[^.]+$/, "");
-    return `<article class="media-tile file-tile ${selectedMedia === item.path ? "is-selected" : ""}" data-media="${e(item.path)}" tabindex="0"><span class="media-art">${thumbnail ? `<img src="${e(thumbnail)}" alt="" loading="lazy">` : icon(item.kind === "mp3" ? "music-2" : "file-video")}<button class="media-file-menu" data-media-menu title="File actions" aria-label="File actions">${icon("ellipsis")}</button></span><small>${item.kind.toUpperCase()} · ${formatBytes(item.size)}</small><b title="${e(title)}">${e(title)}</b></article>`;
+    return `<article class="media-tile file-tile ${selectedMedia === item.path ? "is-selected" : ""}" data-media="${e(item.path)}" tabindex="0"><span class="media-art">${thumbnail ? `<img src="${e(thumbnail)}" alt="" loading="lazy">` : icon(item.kind === "mp3" ? "music-2" : "file-video")}${playMediaButton(item.path, title)}<button class="media-file-menu" data-media-menu title="File actions" aria-label="File actions">${icon("ellipsis")}</button></span><small>${item.kind.toUpperCase()} · ${formatBytes(item.size)}</small><b title="${e(title)}">${e(title)}</b></article>`;
   }).join("");
   const grid = `<div class="media-grid">${folderMarkup}${fileMarkup}</div>`;
-  const list = `<div class="media-list"><div class="media-list-head"><span>Name</span><span>Size</span><span>Date modified</span><span></span></div>${folders.map(folder => `<button class="media-list-row folder-list-row" data-open-folder="${e(folder.path)}"><span class="media-list-name"><span class="list-art">${folder.thumbnail ? `<img src="${e(folder.thumbnail)}" alt="">` : icon("folder-open")}</span><b>${e(folder.name)}</b><small>Folder · ${folder.count} ${folder.count === 1 ? "video" : "videos"}</small></span><small>-</small><small>-</small><span class="open-folder-action">Open ${icon("chevron-right")}</span></button>`).join("")}${items.map(item => `<div class="media-list-row ${selectedMedia === item.path ? "is-selected" : ""}" data-media="${e(item.path)}" tabindex="0"><span class="media-list-name"><span class="list-art">${mediaThumbnail(item) ? `<img src="${e(mediaThumbnail(item)!)}" alt="">` : icon(item.kind === "mp3" ? "music-2" : "file-video")}</span><b title="${e(item.name)}">${e(item.name)}</b></span><small>${formatBytes(item.size)}</small><small>${e(new Date(item.modified).toLocaleDateString())}</small><button class="quiet-button" data-media-menu aria-label="File actions">${icon("ellipsis")}</button></div>`).join("")}</div>`;
+  const list = `<div class="media-list"><div class="media-list-head"><span>Name</span><span>Size</span><span>Date modified</span><span></span></div>${folders.map(folder => `<button class="media-list-row folder-list-row" data-open-folder="${e(folder.path)}"><span class="media-list-name"><span class="list-art">${folder.thumbnail ? `<img src="${e(folder.thumbnail)}" alt="">` : icon("folder-open")}</span><b>${e(folder.name)}</b><small>Folder · ${folder.count} ${folder.count === 1 ? "video" : "videos"}</small></span><small>-</small><small>-</small><span class="open-folder-action">Open ${icon("chevron-right")}</span></button>`).join("")}${items.map(item => `<div class="media-list-row ${selectedMedia === item.path ? "is-selected" : ""}" data-media="${e(item.path)}" tabindex="0"><span class="media-list-name"><span class="list-art">${mediaThumbnail(item) ? `<img src="${e(mediaThumbnail(item)!)}" alt="">` : icon(item.kind === "mp3" ? "music-2" : "file-video")}${playMediaButton(item.path, item.name)}</span><b title="${e(item.name)}">${e(item.name)}</b></span><small>${formatBytes(item.size)}</small><small>${e(new Date(item.modified).toLocaleDateString())}</small><button class="quiet-button" data-media-menu aria-label="File actions">${icon("ellipsis")}</button></div>`).join("")}</div>`;
   result.innerHTML = `${crumbs}${folders.length || items.length ? `${mediaView === "grid" ? grid : list}` : empty("folder-open", media.length ? "No matching files" : "No downloaded media", media.length ? "This folder has no matching files." : "Completed downloads will appear here.")}`;
   icons();
 }
 function mediaThumbnail(item: Media) {
   const task = tasks.find(task => task.files.some(path => path === item.path));
   return task ? taskThumbnail(task) : null;
+}
+function playMediaButton(path: string, title: string) {
+  return `<button class="media-play-overlay" type="button" data-play-media="${e(path)}" aria-label="Play ${e(title)}" title="Play">${icon("play")}</button>`;
 }
 function formatBytes(value: number) { return value >= 1073741824 ? `${(value/1073741824).toFixed(2)} GiB` : value >= 1048576 ? `${(value/1048576).toFixed(2)} MiB` : value >= 1024 ? `${(value/1024).toFixed(1)} KiB` : `${value} B`; }
 function taskThumbnail(task: Task) {
@@ -338,7 +341,7 @@ function taskContextMenu(task: Task, x: number, y: number) {
     if (!target || target.disabled) return; menu.remove();
     const run = async () => {
       if (target.dataset.queueAction === "window") await invoke("show_download", {id: task.id});
-      if (target.dataset.queueAction === "play") await invoke("media_action", {path: task.files[0], action: "play"});
+      if (target.dataset.queueAction === "play") await playMedia(task.files[0]);
       if (target.dataset.queueAction === "rename") requestRename(task.files[0]);
       if (target.dataset.queueAction === "delete" && await confirm(task.files.length ? `Delete ${task.files.length === 1 ? task.title : `${task.files.length} downloaded files`} permanently?` : `Remove “${task.title}” from downloads?`, {title: "Delete download", kind: "warning"})) {
         await invoke("delete_download", {id: task.id}); await refreshState();
@@ -369,13 +372,231 @@ function requestRename(path: string) {
   dialog.showModal(); const input = dialog.querySelector<HTMLInputElement>("#rename-input")!; input.focus(); input.select();
 }
 
+async function playMedia(path: string) {
+  document.querySelector<HTMLDialogElement>(".media-player-dialog[open]")?.close();
+  const item = media.find(file => file.path === path);
+  const task = tasks.find(download => download.files.includes(path));
+  const name = item?.name || path.split(/[\\/]/).pop() || "Downloaded media";
+  const thumbnail = item ? mediaThumbnail(item) : task ? taskThumbnail(task) : null;
+  const audio = /\.(mp3|m4a|wav|ogg|flac|aac|opus|wma|aiff|aif|alac)$/i.test(path);
+  const dialog = document.createElement("dialog");
+  dialog.className = "media-player-dialog";
+  dialog.tabIndex = -1;
+  dialog.setAttribute("aria-label", `Now playing ${name}`);
+  dialog.innerHTML = `<section class="player-shell"><header class="player-header"><div><small>NOW PLAYING</small><h2 title="${e(name)}">${e(name.replace(/\.[^.]+$/, ""))}</h2></div><button class="player-close" type="button" aria-label="Close player">${icon("x")}</button></header><div class="player-stage ${audio ? "player-stage-audio" : "player-stage-video"}">${audio ? `<div class="player-audio-art">${thumbnail ? `<img src="${e(thumbnail)}" alt="">` : icon("music-2")}<div class="player-audio-shade"></div></div><audio class="player-media" controls preload="metadata"></audio>` : `<video class="player-media" controls playsinline preload="metadata"></video>`}<button class="player-center-play" type="button" data-player-toggle aria-label="Play">${icon("play")}</button><p class="player-message" role="status" hidden></p></div></section>`;
+  const mediaElement = dialog.querySelector<HTMLMediaElement>(".player-media")!;
+  mediaElement.controls = false;
+  const stage = dialog.querySelector<HTMLElement>(".player-stage")!;
+  stage.insertAdjacentHTML("beforeend", '<div class="player-control-bar"><input class="player-seek" type="range" min="0" max="1000" value="0" aria-label="Seek"><div class="player-control-row"><div class="player-control-group"><button class="player-control" data-player-bottom-toggle type="button" aria-label="Play" title="Play (Space)">' + icon("play") + '</button><button class="player-control" data-player-mute type="button" aria-label="Mute" title="Mute (M)">' + icon("volume-2") + '</button><input class="player-volume" data-player-volume type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume"><span class="player-time"><span data-current-time>0:00</span><span class="player-time-divider"> / </span><span data-duration>0:00</span></span></div><div class="player-control-group player-control-right"><button class="player-control player-loop" data-player-loop type="button" aria-label="Repeat off" title="Repeat">' + icon("repeat") + '</button><button class="player-control" data-player-captions type="button" aria-label="Toggle captions" title="Captions (C)" disabled>' + icon("captions") + '</button><div class="player-settings-wrap"><button class="player-control" data-player-settings type="button" aria-label="Playback settings" title="Playback speed">' + icon("settings") + '</button><div class="player-settings-menu" data-player-settings-menu hidden><label for="player-speed">Playback speed</label><select id="player-speed" data-player-speed><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>Normal</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option></select></div></div><button class="player-control" data-player-pip type="button" aria-label="Picture in picture" title="Picture in picture (P)">' + icon("picture-in-picture-2") + '</button><button class="player-control" data-player-fullscreen type="button" aria-label="Enter fullscreen" title="Fullscreen (F)">' + icon("maximize") + '</button><button class="player-control player-help-button" data-player-help type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button></div></div><div class="player-shortcuts" data-player-shortcuts hidden><b>Keyboard shortcuts</b><span><kbd>Space</kbd>/<kbd>K</kbd> Play/pause</span><span><kbd>←</kbd>/<kbd>→</kbd> 5s · <kbd>J</kbd>/<kbd>L</kbd> 10s</span><span><kbd>↑</kbd>/<kbd>↓</kbd> Volume · <kbd>M</kbd> Mute</span><span><kbd>F</kbd> Fullscreen · <kbd>P</kbd> PiP · <kbd>C</kbd> Captions</span><span><kbd>0–9</kbd> Jump · <kbd>Home</kbd>/<kbd>End</kbd> Start/end</span><span><kbd>Esc</kbd> Close · <kbd>?</kbd> Shortcuts</span></div>');
+  const playButton = dialog.querySelector<HTMLButtonElement>("[data-player-toggle]")!;
+  const bottomPlay = dialog.querySelector<HTMLButtonElement>("[data-player-bottom-toggle]")!;
+  const seek = dialog.querySelector<HTMLInputElement>(".player-seek")!;
+  const volume = dialog.querySelector<HTMLInputElement>("[data-player-volume]")!;
+  const muteButton = dialog.querySelector<HTMLButtonElement>("[data-player-mute]")!;
+  const currentTime = dialog.querySelector<HTMLElement>("[data-current-time]")!;
+  const durationTime = dialog.querySelector<HTMLElement>("[data-duration]")!;
+  const settingsMenu = dialog.querySelector<HTMLElement>("[data-player-settings-menu]")!;
+  const captionsButton = dialog.querySelector<HTMLButtonElement>("[data-player-captions]")!;
+  const shortcuts = dialog.querySelector<HTMLElement>("[data-player-shortcuts]")!;
+  const message = dialog.querySelector<HTMLElement>(".player-message")!;
+  const pipButton = dialog.querySelector<HTMLButtonElement>("[data-player-pip]")!;
+  const fullscreenButton = dialog.querySelector<HTMLButtonElement>("[data-player-fullscreen]")!;
+  const appWindow = getCurrentWindow();
+  let idleTimer = 0;
+  let clickTimer = 0;
+  let feedbackTimer = 0;
+  let enteredFullscreen = false;
+  if (!(mediaElement instanceof HTMLVideoElement) || !document.pictureInPictureEnabled) pipButton.hidden = true;
+  const updateFullscreenButton = async () => {
+    const fullscreen = await appWindow.isFullscreen().catch(() => false);
+    fullscreenButton.innerHTML = icon(fullscreen ? "minimize" : "maximize");
+    fullscreenButton.setAttribute("aria-label", fullscreen ? "Exit fullscreen" : "Enter fullscreen");
+    fullscreenButton.title = fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)";
+    icons();
+  };
+  const toggleFullMode = async () => {
+    const fullscreen = await appWindow.isFullscreen().catch(() => false);
+    try {
+      await appWindow.setFullscreen(!fullscreen);
+      enteredFullscreen = !fullscreen;
+    } catch {
+      if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+      else await dialog.requestFullscreen().catch(() => {});
+    }
+    await updateFullscreenButton();
+  };
+  const revealControls = () => {
+    dialog.classList.remove("player-idle");
+    window.clearTimeout(idleTimer);
+    if (!mediaElement.paused && settingsMenu.hidden && shortcuts.hidden) {
+      idleTimer = window.setTimeout(() => {
+        if (!mediaElement.paused && settingsMenu.hidden && shortcuts.hidden) dialog.classList.add("player-idle");
+      }, 2400);
+    }
+  };
+  stage.addEventListener("pointermove", revealControls);
+  stage.addEventListener("pointerdown", revealControls);
+  stage.addEventListener("click", event => {
+    const target = event.target as Element;
+    if (target.closest(".player-control-bar,.player-close,.player-settings-menu,.player-shortcuts")) return;
+    if (target.closest("button") && !target.closest(".player-center-play")) return;
+    window.clearTimeout(clickTimer);
+    clickTimer = window.setTimeout(() => {
+      if (mediaElement.readyState > 0) togglePlayback();
+    }, 220);
+  });
+  if (!audio) stage.addEventListener("dblclick", event => {
+    if ((event.target as Element).closest(".player-control-bar,.player-close,.player-settings-menu,.player-shortcuts")) return;
+    window.clearTimeout(clickTimer);
+    event.preventDefault();
+    void toggleFullMode();
+  });
+  const formatTime = (seconds: number) => {
+    if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+    const value = Math.floor(seconds);
+    return value >= 3600 ? `${Math.floor(value / 3600)}:${String(Math.floor(value / 60) % 60).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}` : `${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}`;
+  };
+  const syncSeek = () => {
+    const progress = Number.isFinite(mediaElement.duration) && mediaElement.duration > 0 ? mediaElement.currentTime / mediaElement.duration : 0;
+    seek.value = String(Math.round(progress * 1000));
+    seek.style.setProperty("--seek-progress", `${progress * 100}%`);
+    currentTime.textContent = formatTime(mediaElement.currentTime);
+    durationTime.textContent = formatTime(mediaElement.duration);
+  };
+  const syncPlayback = () => {
+    const playing = !mediaElement.paused && !mediaElement.ended;
+    playButton.innerHTML = icon(playing ? "pause" : "play");
+    bottomPlay.innerHTML = icon(playing ? "pause" : "play");
+    playButton.setAttribute("aria-label", playing ? "Pause" : "Play");
+    bottomPlay.setAttribute("aria-label", playing ? "Pause" : "Play");
+    bottomPlay.title = playing ? "Pause (Space)" : "Play (Space)";
+    playButton.classList.toggle("is-playing", playing);
+    icons();
+  };
+  mediaElement.addEventListener("play", () => { syncPlayback(); revealControls(); });
+  mediaElement.addEventListener("pause", () => { syncPlayback(); revealControls(); });
+  mediaElement.addEventListener("ended", () => { syncPlayback(); revealControls(); });
+  for (const eventName of ["timeupdate", "durationchange", "loadedmetadata", "seeking", "seeked"]) mediaElement.addEventListener(eventName, syncSeek);
+  mediaElement.addEventListener("loadedmetadata", () => { captionsButton.disabled = !mediaElement.textTracks.length; });
+  mediaElement.addEventListener("volumechange", () => {
+    volume.value = String(mediaElement.volume);
+    muteButton.innerHTML = icon(mediaElement.muted || mediaElement.volume === 0 ? "volume-x" : "volume-2");
+    muteButton.setAttribute("aria-label", mediaElement.muted ? "Unmute" : "Mute");
+    icons();
+  });
+  mediaElement.addEventListener("error", () => {
+    const reason = mediaElement.error?.message || `Media error ${mediaElement.error?.code ?? "unknown"}`;
+    message.textContent = `Playback failed: ${reason}`;
+    message.hidden = false;
+  });
+  const togglePlayback = () => {
+    dialog.classList.add("player-feedback-visible");
+    window.clearTimeout(feedbackTimer);
+    feedbackTimer = window.setTimeout(() => dialog.classList.remove("player-feedback-visible"), 900);
+    if (mediaElement.paused) void mediaElement.play().catch(error => {
+      message.textContent = `Could not play this file: ${String(error)}`;
+      message.hidden = false;
+    });
+    else mediaElement.pause();
+  };
+  bottomPlay.addEventListener("click", togglePlayback);
+  seek.addEventListener("input", () => {
+    if (Number.isFinite(mediaElement.duration)) mediaElement.currentTime = mediaElement.duration * Number(seek.value) / 1000;
+    syncSeek();
+  });
+  volume.addEventListener("input", () => { mediaElement.volume = Number(volume.value); mediaElement.muted = mediaElement.volume === 0; });
+  muteButton.addEventListener("click", () => { mediaElement.muted = !mediaElement.muted; });
+  dialog.querySelector<HTMLButtonElement>("[data-player-loop]")?.addEventListener("click", event => {
+    mediaElement.loop = !mediaElement.loop;
+    const button = event.currentTarget as HTMLButtonElement;
+    button.classList.toggle("is-active", mediaElement.loop);
+    button.setAttribute("aria-label", mediaElement.loop ? "Repeat on" : "Repeat off");
+  });
+  dialog.querySelector<HTMLButtonElement>("[data-player-settings]")?.addEventListener("click", () => { settingsMenu.hidden = !settingsMenu.hidden; });
+  dialog.querySelector<HTMLSelectElement>("[data-player-speed]")?.addEventListener("change", event => {
+    mediaElement.playbackRate = Number((event.currentTarget as HTMLSelectElement).value);
+  });
+  captionsButton.addEventListener("click", () => {
+    const tracks = Array.from(mediaElement.textTracks);
+    const show = !tracks.some(track => track.mode === "showing");
+    tracks.forEach(track => { track.mode = show ? "showing" : "hidden"; });
+    captionsButton.classList.toggle("is-active", show);
+  });
+  dialog.querySelector<HTMLButtonElement>("[data-player-pip]")?.addEventListener("click", () => {
+    if (mediaElement instanceof HTMLVideoElement && document.pictureInPictureEnabled) {
+      if (document.pictureInPictureElement) void document.exitPictureInPicture();
+      else void mediaElement.requestPictureInPicture().catch(() => {});
+    }
+  });
+  fullscreenButton.addEventListener("click", () => { void toggleFullMode(); });
+  dialog.querySelector<HTMLButtonElement>("[data-player-help]")?.addEventListener("click", () => { shortcuts.hidden = !shortcuts.hidden; });
+  dialog.addEventListener("keydown", event => {
+    revealControls();
+    const key = event.key.toLowerCase();
+    const target = event.target as HTMLElement;
+    if (target.matches("input,select,textarea") || (target.closest("button") && (event.code === "Space" || event.key === "Enter"))) return;
+    if (event.key === "Escape") { event.preventDefault(); dialog.close(); return; }
+    if (mediaElement.readyState === 0 && key !== "?") return;
+    if (event.code === "Space" || key === "k") { event.preventDefault(); togglePlayback(); }
+    else if (key === "arrowleft" || key === "j") { event.preventDefault(); mediaElement.currentTime = Math.max(0, mediaElement.currentTime - (key === "j" ? 10 : 5)); }
+    else if (key === "arrowright" || key === "l") { event.preventDefault(); mediaElement.currentTime += key === "l" ? 10 : 5; if (Number.isFinite(mediaElement.duration)) mediaElement.currentTime = Math.min(mediaElement.duration, mediaElement.currentTime); }
+    else if (key === "arrowup") { event.preventDefault(); mediaElement.volume = Math.min(1, mediaElement.volume + 0.05); mediaElement.muted = false; }
+    else if (key === "arrowdown") { event.preventDefault(); mediaElement.volume = Math.max(0, mediaElement.volume - 0.05); }
+    else if (key === "m") { event.preventDefault(); mediaElement.muted = !mediaElement.muted; }
+    else if (key === "f") { event.preventDefault(); void toggleFullMode(); }
+    else if (key === "p" && mediaElement instanceof HTMLVideoElement && document.pictureInPictureEnabled) { event.preventDefault(); if (document.pictureInPictureElement) void document.exitPictureInPicture(); else void mediaElement.requestPictureInPicture().catch(() => {}); }
+    else if (key === "c" && mediaElement.textTracks.length) { event.preventDefault(); captionsButton.click(); }
+    else if (key === "home") { event.preventDefault(); mediaElement.currentTime = 0; }
+    else if (key === "end" && Number.isFinite(mediaElement.duration)) { event.preventDefault(); mediaElement.currentTime = mediaElement.duration; }
+    else if (/^[0-9]$/.test(key) && Number.isFinite(mediaElement.duration)) { event.preventDefault(); mediaElement.currentTime = mediaElement.duration * Number(key) / 10; }
+    else if (key === "?") { event.preventDefault(); shortcuts.hidden = !shortcuts.hidden; }
+  });
+  dialog.querySelector(".player-close")?.addEventListener("click", () => dialog.close());
+  dialog.addEventListener("cancel", () => mediaElement.pause());
+  dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); });
+  dialog.addEventListener("close", () => {
+    window.clearTimeout(idleTimer);
+    window.clearTimeout(clickTimer);
+    window.clearTimeout(feedbackTimer);
+    mediaElement.pause();
+    if (enteredFullscreen) void appWindow.setFullscreen(false).catch(() => {});
+    dialog.remove();
+  });
+  document.body.append(dialog);
+  icons();
+  dialog.showModal();
+  dialog.focus();
+  void updateFullscreenButton();
+  playButton.disabled = true;
+  bottomPlay.disabled = true;
+  message.textContent = `Opening ${audio ? "audio" : "video"}…`;
+  message.hidden = false;
+  try {
+    const playableUrl = await invoke<string>("prepare_media_playback", {path});
+    if (!dialog.open) return;
+    mediaElement.src = playableUrl;
+    mediaElement.load();
+    playButton.disabled = false;
+    bottomPlay.disabled = false;
+    message.hidden = true;
+    await mediaElement.play().catch(error => {
+      message.textContent = mediaElement.error?.message || `Press Play to start playback. ${String(error)}`;
+      message.hidden = false;
+    });
+  } catch (error) {
+    if (!dialog.open) return;
+    message.textContent = String(error);
+    message.hidden = false;
+  }
+}
+
 function contextMenu(path: string, x: number, y: number) {
   document.querySelector(".file-menu")?.remove(); const menu = document.createElement("div"); menu.className = "file-menu"; menu.setAttribute("role","menu");
   menu.innerHTML = [["play","Play","play"],["folder","Open folder","folder-open"],["copy","Copy path","copy"],["rename","Rename","pencil"],["delete","Delete file","trash-2"]].map(([action,label,glyph]) => `<button role="menuitem" data-file-action="${action}">${icon(glyph)}<span>${label}</span></button>`).join("");
   menu.style.left = `${Math.max(8,Math.min(x,innerWidth-180))}px`; menu.style.top = `${Math.max(8,Math.min(y,innerHeight-170))}px`; document.body.append(menu);
   menu.addEventListener("click", event => { const button = (event.target as Element).closest<HTMLElement>("[data-file-action]"); if (!button) return; menu.remove(); void fileAction(path,button.dataset.fileAction!).catch(err => setStatus(String(err))); }); menu.querySelector("button")?.focus();
 }
-async function fileAction(path: string, action: string) { if (action === "rename") { requestRename(path); return; } if (action === "copy") { await navigator.clipboard.writeText(path); setStatus("File path copied."); return; } if (action === "delete" && !await confirm(`Delete ${path.split(/[\\/]/).pop()} permanently?`, {title:"Delete file",kind:"warning"})) return; await invoke("media_action",{path,action}); if (action === "delete") await loadMedia(); }
+async function fileAction(path: string, action: string) { if (action === "play") { await playMedia(path); return; } if (action === "rename") { requestRename(path); return; } if (action === "copy") { await navigator.clipboard.writeText(path); setStatus("File path copied."); return; } if (action === "delete" && !await confirm(`Delete ${path.split(/[\\/]/).pop()} permanently?`, {title:"Delete file",kind:"warning"})) return; await invoke("media_action",{path,action}); if (action === "delete") await loadMedia(); }
 function handleYouTubeSearchInput(input: HTMLInputElement) {
   const popover = app.querySelector<HTMLElement>("#youtube-search-popover");
   if (!input || !popover) return;
@@ -580,6 +801,7 @@ app.addEventListener("click", event => {
       if (target.dataset.taskAction === "retry") await startDownload(task.url, task.quality, task.playlistStart);
       if (target.dataset.taskAction === "copy") { await navigator.clipboard.writeText(task.url); setStatus("URL copied."); }
     } else if (target.dataset.sort) { const key = target.dataset.sort as keyof Media; sortAsc = sortKey === key ? !sortAsc : true; sortKey = key; renderMedia(); }
+    else if (target.dataset.playMedia) await playMedia(target.dataset.playMedia);
     else if (target.hasAttribute("data-media-menu")) { const row = target.closest<HTMLElement>("[data-media]"); if (row) { const rect = target.getBoundingClientRect(); contextMenu(row.dataset.media!,rect.left,rect.bottom); } }
   }; void run().catch(err => setStatus(String(err)));
 });
@@ -594,9 +816,9 @@ app.addEventListener("change", event => {
   if (input.id === "auto-close") app.querySelector<HTMLInputElement>("#auto-close-delay")!.disabled = !(input as HTMLInputElement).checked;
   void saveSettingsFromUI().catch(error => setStatus(`Could not save settings: ${String(error)}`));
 });
-app.addEventListener("dblclick", event => { const row = (event.target as Element).closest<HTMLElement>("[data-media]"); if (row) void fileAction(row.dataset.media!,"play").catch(err => setStatus(String(err))); });
+app.addEventListener("dblclick", event => { const target = event.target as Element; if (target.closest("[data-play-media],[data-media-menu]")) return; const row = target.closest<HTMLElement>("[data-media]"); if (row) void playMedia(row.dataset.media!).catch(err => setStatus(String(err))); });
 app.addEventListener("contextmenu", event => { const row = (event.target as Element).closest<HTMLElement>("[data-media]"); if (row) { event.preventDefault(); selectedMedia = row.dataset.media!; contextMenu(selectedMedia,event.clientX,event.clientY); } });
-app.addEventListener("keydown", event => { const row = (event.target as Element).closest<HTMLElement>("[data-media]"); if (!row) return; if (event.key === "Enter") { event.preventDefault(); void fileAction(row.dataset.media!, "play").catch(err => setStatus(String(err))); } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) { event.preventDefault(); const rect = row.getBoundingClientRect(); contextMenu(row.dataset.media!,rect.left+20,rect.top+20); } });
+app.addEventListener("keydown", event => { const target = event.target as Element; if (target.closest("[data-play-media],[data-media-menu]")) return; const row = target.closest<HTMLElement>("[data-media]"); if (!row) return; if (event.key === "Enter") { event.preventDefault(); void playMedia(row.dataset.media!).catch(err => setStatus(String(err))); } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) { event.preventDefault(); const rect = row.getBoundingClientRect(); contextMenu(row.dataset.media!,rect.left+20,rect.top+20); } });
 app.addEventListener("click", event => {
   const target = event.target as Element;
   const row = target.closest<HTMLElement>("[data-media]");

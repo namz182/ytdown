@@ -144,6 +144,30 @@ impl Service {
         Ok(service)
     }
 }
+pub fn allow_playback_directories(app: &tauri::AppHandle, service: &Service) -> Result<(), String> {
+    let folders = {
+        let inner = service.inner.lock().unwrap();
+        let mut folders = vec![inner.store.settings.download_folder.clone()];
+        folders.extend(inner.store.tasks.iter().map(|task| task.folder.clone()));
+        folders
+    };
+    for (index, folder) in folders.into_iter().enumerate() {
+        let path = PathBuf::from(folder);
+        if path.as_os_str().is_empty() {
+            continue;
+        }
+        if index == 0 {
+            fs::create_dir_all(&path).map_err(|error| error.to_string())?;
+        } else if !path.is_dir() {
+            continue;
+        }
+        let path = fs::canonicalize(path).map_err(|error| error.to_string())?;
+        app.asset_protocol_scope()
+            .allow_directory(path, true)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
 fn downloader(service: &Service) -> PathBuf {
     let managed = service.data.join(if cfg!(windows) {
         "yt-dlp.exe"
@@ -234,6 +258,10 @@ pub fn save_settings(
         return Err("Choose an absolute download folder.".into());
     }
     fs::create_dir_all(&settings.download_folder).map_err(|e| e.to_string())?;
+    let playback_folder = fs::canonicalize(&settings.download_folder).map_err(|e| e.to_string())?;
+    app.asset_protocol_scope()
+        .allow_directory(playback_folder, true)
+        .map_err(|error| error.to_string())?;
     {
         let mut inner = service.inner.lock().unwrap();
         inner.store.settings = settings;
@@ -325,7 +353,13 @@ pub async fn inspect_playlist(app: tauri::AppHandle, url: String) -> Result<Valu
     let executable = downloader(&service);
     let output = tauri::async_runtime::spawn_blocking(move || {
         Command::new(executable)
-            .args(["--ignore-config", "--flat-playlist", "--dump-single-json", "--no-warnings", &url])
+            .args([
+                "--ignore-config",
+                "--flat-playlist",
+                "--dump-single-json",
+                "--no-warnings",
+                &url,
+            ])
             .output()
     })
     .await
@@ -336,7 +370,10 @@ pub async fn inspect_playlist(app: tauri::AppHandle, url: String) -> Result<Valu
     }
     let info: Value = serde_json::from_slice(&output.stdout)
         .map_err(|_| "yt-dlp returned unreadable playlist information.".to_string())?;
-    let count = info.get("entries").and_then(Value::as_array).map_or(0, Vec::len);
+    let count = info
+        .get("entries")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
     Ok(json!({
         "isPlaylist": count > 1,
         "title": info.get("title").and_then(Value::as_str).unwrap_or("Playlist"),
@@ -393,7 +430,9 @@ pub fn schedule(app: tauri::AppHandle) {
 fn normalize_quality(quality: &str) -> String {
     if matches!(quality, "Audio only (MP3)" | "Audio only (MP4)") {
         "Audio only (MP3)".into()
-    } else { quality.into() }
+    } else {
+        quality.into()
+    }
 }
 fn download_arguments(task: &Task) -> Vec<String> {
     let mut args: Vec<String> = [
@@ -418,20 +457,33 @@ fn download_arguments(task: &Task) -> Vec<String> {
     .collect();
     args.extend([task.playlist_start.to_string(), "-P".into(), task.folder.clone(), "-o".into(), "%(playlist_title|.)s/%(title)s.%(ext)s".into(), "--print".into(), "before_dl:YT_TITLE:%(title)s".into(), "--print".into(), "after_move:YT_FILE:%(filepath)s".into(), "--progress-template".into(), "download:YT_PROGRESS:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress.downloaded_bytes)s|%(progress.total_bytes,progress.total_bytes_estimate)s".into()]);
     let audio_only = task.quality.starts_with("Audio only");
-    let format = if audio_only { "ba/b".into() } else {
+    let format = if audio_only {
+        "ba/b".into()
+    } else {
         let height = match task.quality.as_str() {
             "480p (SD)" => Some(480),
             "720p (HD)" => Some(720),
             "1080p (Full HD)" => Some(1080),
             _ => None,
         };
-        height.map(|h| format!("bv*[ext=mp4][height<={h}]+ba[ext=m4a]/b[ext=mp4][height<={h}]/bv*[height<={h}]+ba/b[height<={h}]")).unwrap_or_else(|| "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b".into())
+        height.map(|h| format!("bv*[ext=mp4][vcodec^=avc1][height<={h}]+ba[ext=m4a]/b[ext=mp4][vcodec^=avc1][height<={h}]/bv*[ext=mp4][height<={h}]+ba[ext=m4a]/b[ext=mp4][height<={h}]/bv*[height<={h}]+ba/b[height<={h}]")).unwrap_or_else(|| "bv*[ext=mp4][vcodec^=avc1]+ba[ext=m4a]/b[ext=mp4][vcodec^=avc1]/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b".into())
     };
     args.extend(["-f".into(), format]);
     if audio_only {
-        args.extend(["-x".into(), "--audio-format".into(), "mp3".into(), "--audio-quality".into(), "192K".into()]);
+        args.extend([
+            "-x".into(),
+            "--audio-format".into(),
+            "mp3".into(),
+            "--audio-quality".into(),
+            "192K".into(),
+        ]);
     } else {
-        args.extend(["--merge-output-format".into(), "mp4".into(), "--recode-video".into(), "mp4".into()]);
+        args.extend([
+            "--merge-output-format".into(),
+            "mp4".into(),
+            "--recode-video".into(),
+            "mp4".into(),
+        ]);
     }
     args
 }
@@ -766,7 +818,9 @@ fn scan(root: &Path, dir: &Path, result: &mut Vec<Media>) -> Result<(), String> 
                 .unwrap_or("")
                 .to_lowercase();
             if ![
-                "mp4", "mkv", "webm", "mp3", "m4a", "wav", "ogg", "flac", "mov",
+                "mp4", "mkv", "webm", "mov", "m4v", "avi", "flv", "wmv", "mpg", "mpeg", "ts",
+                "3gp", "mp3", "m4a", "wav", "ogg", "flac", "aac", "opus", "wma", "aiff", "aif",
+                "alac",
             ]
             .contains(&ext.as_str())
             {
@@ -842,6 +896,167 @@ fn media_path(service: &Service, path: &str) -> Result<PathBuf, String> {
         return Err("Select a downloaded file.".into());
     }
     Ok(path)
+}
+
+fn direct_playback_supported(
+    extension: &str,
+    audio_only: bool,
+    video_codec: Option<&str>,
+    audio_codec: Option<&str>,
+) -> bool {
+    if audio_only {
+        match extension {
+            "mp3" => audio_codec == Some("mp3"),
+            "m4a" | "aac" => matches!(audio_codec, Some("aac" | "alac" | "mp3")),
+            "wav" => audio_codec.is_some_and(|codec| codec.starts_with("pcm_")),
+            "ogg" => matches!(audio_codec, Some("vorbis" | "opus" | "flac")),
+            "opus" => audio_codec == Some("opus"),
+            "flac" => audio_codec == Some("flac"),
+            "aiff" | "aif" => audio_codec.is_some_and(|codec| codec.starts_with("pcm_")),
+            _ => false,
+        }
+    } else {
+        let audio_is_supported = matches!(audio_codec, None | Some("aac" | "opus" | "vorbis"));
+        match extension {
+            "mp4" | "m4v" | "mov" => {
+                matches!(video_codec, Some("h264" | "av1"))
+                    && matches!(audio_codec, None | Some("aac"))
+            }
+            "webm" => {
+                matches!(video_codec, Some("vp8" | "vp9" | "av1")) && audio_is_supported
+            }
+            _ => false,
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn prepare_media_playback(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let service = app.state::<Service>();
+        let source = media_path(&service, &path)?;
+        let extension = source
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if ![
+            "mp4", "mkv", "webm", "mov", "m4v", "avi", "flv", "wmv", "mpg", "mpeg", "ts", "3gp",
+            "mp3", "m4a", "wav", "ogg", "flac", "aac", "opus", "wma", "aiff", "aif", "alac",
+        ]
+        .contains(&extension.as_str())
+        {
+            return Err("This file is not a supported audio or video format.".into());
+        }
+        let probe = Command::new("ffprobe")
+            .args([
+                "-v",
+                "error",
+                "-show_entries",
+                "stream=codec_name,codec_type",
+                "-of",
+                "json",
+            ])
+            .arg(&source)
+            .output()
+            .map_err(|error| format!("FFprobe is required for media playback: {error}"))?;
+        if !probe.status.success() {
+            return Err("Could not inspect this file for playback.".into());
+        }
+        let details: Value =
+            serde_json::from_slice(&probe.stdout).map_err(|error| error.to_string())?;
+        let streams = details["streams"]
+            .as_array()
+            .ok_or("This file has no playable streams.")?;
+        let video_codec = streams
+            .iter()
+            .find(|stream| stream["codec_type"] == "video")
+            .and_then(|stream| stream["codec_name"].as_str());
+        let audio_codec = streams
+            .iter()
+            .find(|stream| stream["codec_type"] == "audio")
+            .and_then(|stream| stream["codec_name"].as_str());
+        if video_codec.is_none() && audio_codec.is_none() {
+            return Err("This file has no playable audio or video.".into());
+        }
+        let audio_only = video_codec.is_none();
+        let direct =
+            direct_playback_supported(&extension, audio_only, video_codec, audio_codec);
+        if direct {
+            return Ok(app
+                .state::<crate::media_server::MediaServer>()
+                .url_for(source));
+        }
+
+        let metadata = fs::metadata(&source).map_err(|error| error.to_string())?;
+        let identity = format!(
+            "playback-v2:{}:{}:{:?}",
+            source.display(),
+            metadata.len(),
+            metadata.modified().unwrap_or(UNIX_EPOCH)
+        );
+        let key = format!("{:x}", Sha256::digest(identity.as_bytes()));
+        let cache = app
+            .path()
+            .app_cache_dir()
+            .map_err(|error| error.to_string())?
+            .join("playback");
+        fs::create_dir_all(&cache).map_err(|error| error.to_string())?;
+        let format = if audio_only { "mp3" } else { "mp4" };
+        let output = cache.join(format!("{key}.{format}"));
+        if !output.is_file() || fs::metadata(&output).is_ok_and(|file| file.len() == 0) {
+            let temporary = cache.join(format!("{key}.{}.{format}", now()));
+            let mut command = Command::new("ffmpeg");
+            command
+                .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i"])
+                .arg(&source);
+            if audio_only {
+                command.args(["-map", "0:a:0", "-vn", "-c:a", "libmp3lame", "-b:a", "192k"]);
+            } else {
+                command.args([
+                    "-map",
+                    "0:v:0",
+                    "-map",
+                    "0:a:0?",
+                    "-sn",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "ultrafast",
+                    "-crf",
+                    "25",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "160k",
+                    "-movflags",
+                    "+faststart",
+                ]);
+            }
+            let conversion = command
+                .arg(&temporary)
+                .output()
+                .map_err(|error| format!("FFmpeg is required for media playback: {error}"))?;
+            if !conversion.status.success() {
+                let _ = fs::remove_file(&temporary);
+                let detail = String::from_utf8_lossy(&conversion.stderr);
+                return Err(format!("Could not prepare this file: {}", detail.trim()));
+            }
+            if let Err(error) = fs::rename(&temporary, &output) {
+                let _ = fs::remove_file(&temporary);
+                if !output.is_file() {
+                    return Err(error.to_string());
+                }
+            }
+        }
+        Ok(app
+            .state::<crate::media_server::MediaServer>()
+            .url_for(output))
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 fn rename_file(path: &Path, name: &str) -> Result<PathBuf, String> {
     let name = name.trim();
@@ -1282,6 +1497,25 @@ pub fn quit_app(app: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn supported_codecs_play_without_waiting_for_transcoding() {
+        assert!(direct_playback_supported("mp4", false, Some("av1"), Some("aac")));
+        assert!(direct_playback_supported(
+            "webm",
+            false,
+            Some("vp9"),
+            Some("opus")
+        ));
+        assert!(direct_playback_supported("m4a", true, None, Some("aac")));
+        assert!(!direct_playback_supported(
+            "mkv",
+            false,
+            Some("hevc"),
+            Some("ac3")
+        ));
+    }
+
     fn task(id: &str, status: &str) -> Task {
         Task {
             id: id.into(),
@@ -1392,8 +1626,14 @@ mod tests {
         };
         let args = download_arguments(&audio);
         assert!(args.windows(2).any(|pair| pair == ["-f", "ba/b"]));
-        assert!(args.windows(2).any(|pair| pair == ["--audio-format", "mp3"]));
-        assert!(args.windows(2).any(|pair| pair == ["--audio-quality", "192K"]));
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--audio-format", "mp3"])
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--audio-quality", "192K"])
+        );
         assert!(!args.contains(&"--recode-video".into()));
         assert_eq!(normalize_quality("Audio only (MP4)"), "Audio only (MP3)");
     }

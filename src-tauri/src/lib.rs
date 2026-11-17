@@ -1,4 +1,5 @@
 mod extension_server;
+mod media_server;
 mod service;
 use tauri::Manager;
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -159,6 +160,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let service = service::Service::new(app.handle()).map_err(std::io::Error::other)?;
+            service::allow_playback_directories(app.handle(), &service)
+                .map_err(std::io::Error::other)?;
+            app.manage(media_server::MediaServer::start()?);
             app.manage(service);
             service::schedule(app.handle().clone());
 
@@ -219,6 +223,7 @@ pub fn run() {
             service::show_download,
             service::show_updates,
             service::list_media,
+            service::prepare_media_playback,
             service::media_action,
             service::open_folder,
             service::tool_status,
